@@ -698,14 +698,8 @@ async function submitAnswer() {
     const feedbackArea = document.getElementById('feedbackArea');
     feedbackArea.innerHTML = '<div class="loading-overlay"><div class="spinner"></div><span>Generating feedback...</span></div>';
 
-    // Always read API key fresh from CONFIG
-    const apiKey = (typeof CONFIG !== 'undefined' && CONFIG.OPENAI_API_KEY) || '';
-    if (!apiKey) {
-        showToast('OpenAI API key not configured in config.js', 'error');
-    }
-
-    // GPT-only mode — rule-based disabled
-    const feedback = await getAIFeedback(interviewState.currentQuestion, interviewState.transcript, apiKey);
+    // GPT-only mode — feedback comes from the Supabase Edge Function proxy
+    const feedback = await getAIFeedback(interviewState.currentQuestion, interviewState.transcript);
 
     const attempt = {
         question: interviewState.currentQuestion.text,
@@ -745,52 +739,30 @@ async function submitAnswer() {
     };
 }
 
-async function getAIFeedback(question, transcript, apiKey) {
-    const key = apiKey || (typeof CONFIG !== 'undefined' && CONFIG.OPENAI_API_KEY) || '';
+async function getAIFeedback(question, transcript) {
     try {
-        const response = await fetch('https://api.openai.com/v1/responses', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${key}`
-            },
-            body: JSON.stringify({
-                model: 'gpt-5.4-mini',
-                input: [
-                    {
-                        role: 'developer',
-                        content: `You are an expert interview coach evaluating a candidate's response to an interview question. Analyze the response and provide structured feedback.
-
-Respond in this exact JSON format:
-{
-    "score": <number 0-100>,
-    "overall": "<brief overall assessment>",
-    "strengths": ["<strength 1>", "<strength 2>"],
-    "improvements": ["<improvement 1>", "<improvement 2>"],
-    "missingPoints": ["<missing point 1>"],
-    "exampleAnswer": "<brief example of a strong answer>",
-    "tips": ["<tip 1>", "<tip 2>"]
-}
-
-The expected key points for this question are: ${question.expected_points}`
-                    },
-                    {
-                        role: 'user',
-                        content: `Interview Question: "${question.text}"\n\nCandidate's Answer: "${transcript}"\n\nPlease evaluate this answer.`
-                    }
-                ],
-                reasoning: { effort: 'low' },
-                text: { verbosity: 'medium' }
-            })
-        });
-
-        if (!response.ok) {
-            const errBody = await response.json().catch(() => ({}));
-            console.error('[OpenAI] Status:', response.status, 'Body:', errBody);
-            throw new Error(`API error ${response.status}: ${errBody.error?.message || 'Unknown error'}`);
+        // The OpenAI key is NOT in the browser. We call the Supabase Edge
+        // Function "openai-proxy", which holds the key as a server secret and
+        // forwards the request. invoke() attaches the logged-in user's token
+        // automatically; the proxy rejects anonymous (not signed-in) callers.
+        const client = (typeof SupabaseClient !== 'undefined') ? SupabaseClient.getClient() : null;
+        if (!client || !client.functions) {
+            showToast('Supabase not connected — cannot run AI interview', 'error');
+            return { score: 0, overall: 'Supabase not connected', strengths: [], improvements: [], missingPoints: [], exampleAnswer: '', tips: [] };
         }
 
-        const data = await response.json();
+        const { data, error } = await client.functions.invoke('openai-proxy', {
+            body: {
+                question: { text: question.text, expected_points: question.expected_points },
+                transcript: transcript
+            }
+        });
+
+        if (error) {
+            console.error('[Proxy] invoke error:', error);
+            showToast('Sign in to use the AI interview (or the AI service is busy)', 'warning');
+            return { score: 0, overall: 'AI feedback unavailable: ' + (error.message || 'error'), strengths: [], improvements: [], missingPoints: [], exampleAnswer: '', tips: [] };
+        }
 
         // Extract text from Responses API: output_text (convenience) or output array
         let content = data.output_text;

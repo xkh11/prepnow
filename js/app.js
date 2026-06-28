@@ -104,7 +104,6 @@ async function initApp() {
 // ============================================
 async function checkAPIConnections() {
     let supabaseOk = false;
-    let openaiOk = false;
 
     // 1. Check Supabase — try to query the questions table
     if (typeof SupabaseClient !== 'undefined' && SupabaseClient.isConnected()) {
@@ -116,32 +115,16 @@ async function checkAPIConnections() {
         }
     }
 
-    // 2. Check OpenAI — verify API key against models endpoint
-    const openaiKey = (typeof CONFIG !== 'undefined' && CONFIG.OPENAI_API_KEY) || '';
-    if (openaiKey && openaiKey.startsWith('sk-')) {
-        try {
-            const res = await fetch('https://api.openai.com/v1/models/gpt-5.4-mini', {
-                headers: { 'Authorization': `Bearer ${openaiKey}` }
-            });
-            openaiOk = res.ok;
-        } catch (e) {
-            openaiOk = false;
-        }
-    }
-
-    // 3. Show results
-    if (supabaseOk && openaiOk) {
-        showToast('All APIs connected — Supabase + OpenAI ready', 'success');
-    } else if (supabaseOk && !openaiOk) {
-        showToast('Supabase connected — OpenAI failed (check API key & billing)', 'warning');
-    } else if (!supabaseOk && openaiOk) {
-        showToast('OpenAI connected — Supabase failed (check URL & key)', 'warning');
+    // OpenAI is reached through the Supabase Edge Function "openai-proxy",
+    // so the key is never in the browser — there is nothing to check here.
+    if (supabaseOk) {
+        showToast('Connected — ready to go', 'success');
     } else {
-        showToast('Both APIs failed — check config.js credentials', 'error');
+        showToast('Supabase connection failed — check js/config.js', 'error');
     }
 
     console.log('[PrepNow] Supabase:', supabaseOk ? 'Connected' : 'Failed');
-    console.log('[PrepNow] OpenAI:', openaiOk ? 'Connected' : 'Failed');
+    console.log('[PrepNow] OpenAI: via Edge Function proxy (server-side)');
 }
 
 // Start the app
