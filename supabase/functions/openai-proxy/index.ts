@@ -58,7 +58,9 @@ Deno.serve(async (req: Request) => {
   }
 
   // Require a signed-in user (reject the anonymous role)
-  if (jwtRole(req.headers.get("Authorization")) !== "authenticated") {
+  const callerRole = jwtRole(req.headers.get("Authorization"));
+  console.log("[openai-proxy] caller role:", callerRole);
+  if (callerRole !== "authenticated") {
     return json({ error: "Sign in required" }, 401);
   }
 
@@ -121,8 +123,12 @@ The expected key points for this question are: ${question.expected_points ?? ""}
   });
 
   // Pass the OpenAI response straight back to the browser (same shape the
-  // front end already parses), preserving the status code.
+  // front end already parses), preserving the status code. Log failures so
+  // they appear in the function's Logs tab.
   const responseBody = await openaiRes.text();
+  if (!openaiRes.ok) {
+    console.error("[openai-proxy] OpenAI error", openaiRes.status, responseBody);
+  }
   return new Response(responseBody, {
     status: openaiRes.status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },

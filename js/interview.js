@@ -759,9 +759,17 @@ async function getAIFeedback(question, transcript) {
         });
 
         if (error) {
-            console.error('[Proxy] invoke error:', error);
-            showToast('Sign in to use the AI interview (or the AI service is busy)', 'warning');
-            return { score: 0, overall: 'AI feedback unavailable: ' + (error.message || 'error'), strengths: [], improvements: [], missingPoints: [], exampleAnswer: '', tips: [] };
+            // Surface the real reason from the function's response body
+            let detail = error.message || 'error';
+            try {
+                if (error.context && typeof error.context.json === 'function') {
+                    const body = await error.context.json();
+                    detail = (body && (body.error?.message || body.error)) || detail;
+                }
+            } catch (_) { /* keep the generic message */ }
+            console.error('[Proxy] invoke error:', error, detail);
+            showToast('AI error: ' + detail, 'error');
+            return { score: 0, overall: 'AI feedback unavailable: ' + detail, strengths: [], improvements: [], missingPoints: [], exampleAnswer: '', tips: [] };
         }
 
         // Extract text from Responses API: output_text (convenience) or output array
